@@ -178,6 +178,31 @@ python -m emg2pose.train train=True eval=True \
   transforms=basic
 ```
 
+## Render a qualitative reconstruction
+
+For a frame-synchronous qualitative check, run
+`render_actionsense_reconstruction.py` in the Linux EMG2Pose environment. It
+keeps the heavy checkpoint on the GPU, reconstructs the 20 joint angles, and
+writes a 30 Hz MP4 with three panels: ActionSense RGB, the predicted hand, and
+the prediction overlaid on the ground-truth hand. The input video can be a
+short clip for one activity rather than the full multi-gigabyte recording.
+
+```sh
+python render_actionsense_reconstruction.py \
+  --prepared-hdf5 /data/datasets/actionsense/prepared_s04/S04_2022-06-14_16-38-43_activity-019_left.hdf5 \
+  --video /data/datasets/actionsense/actionsense_activity019_source.mp4 \
+  --checkpoint /data/datasets/actionsense/full_train_s04_20260823/lightning_logs/version_0/checkpoints/epoch=121-step=1464.ckpt \
+  --config /data/datasets/actionsense/full_train_s04_20260823/hydra_configs/config.yaml \
+  --emg2pose-root /home/joseph/projects/emg2pose \
+  --output /data/datasets/actionsense/actionsense_activity019_reconstruction.mp4 \
+  --side left --fps 30
+```
+
+The ActionSense model has zero right context, so this playback is causal: the
+prediction at each displayed time only uses EMG up to that time. Inference is
+batched to make export fast, but the resulting reconstruction is rendered at
+the model's 30 Hz clock.
+
 List the complete object tree:
 
 ```sh
