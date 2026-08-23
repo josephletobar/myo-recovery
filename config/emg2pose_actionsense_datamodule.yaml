@@ -11,3 +11,8 @@ datamodule:
   val_test_window_length: 600 # 20 seconds at 30 Hz
   padding: [0, 0]
   skip_ik_failures: true
+  # Optional controlled experiment: sample motion-rich training windows more
+  # often while leaving validation/test sampling unchanged.
+  motion_sampling: false
+  motion_sampling_floor: 0.25
+  motion_sampling_power: 0.5
