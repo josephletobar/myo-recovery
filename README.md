@@ -164,10 +164,11 @@ they are too large for a 30-Hz file and can produce no windows for a short
 activity. The supplied override uses 120-sample training windows and
 600-sample validation/test windows. Finally, use
 `config/emg2pose_actionsense_pose_stateful.yaml` for the stateful decoder.
-The current Meta pose module has a hard-coded 2,000-Hz constant; its supplied
-`rollout_freq: 2000` compatibility setting makes it emit one prediction for
-each 30-Hz feature row. A small upstream cleanup is to make that input rate a
-constructor parameter and set both rates to 30.
+The Meta pose module is patched on the Linux checkout branch
+`actionsense-30hz` (commit `af618b3`) so its decoder accepts
+`input_sample_rate: 30` and `rollout_freq: 30`. Its derivative metrics use the
+same explicit rate; no 2,000-Hz compatibility setting or hidden resampling is
+needed.
 
 The resulting Meta-repository selection is:
 
