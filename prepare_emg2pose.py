@@ -20,12 +20,6 @@ def main() -> None:
     parser.add_argument("--target-hz", type=float, default=30.0)
     parser.add_argument("--emg-mode", choices=("rms", "linear"), default="rms")
     parser.add_argument(
-        "--angle-calibration",
-        choices=("none", "xsens-open-hand"),
-        default="none",
-        help="apply the recorded Manus open-hand neutral offset",
-    )
-    parser.add_argument(
         "--emg-scale",
         type=float,
         default=128.0,
@@ -52,7 +46,6 @@ def main() -> None:
         target_hz=args.target_hz,
         emg_mode=args.emg_mode,
         emg_scale=None if args.emg_scale == 0 else args.emg_scale,
-        angle_calibration=args.angle_calibration,
         include_invalid=args.include_invalid,
         overwrite=args.overwrite,
     )

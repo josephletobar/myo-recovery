@@ -51,7 +51,6 @@ def align_for_emg2pose(
     side: Literal["left", "right"],
     target_hz: float = 30.0,
     emg_mode: Literal["rms", "linear"] = "rms",
-    neutral_degrees: np.ndarray | None = None,
 ) -> Emg2PoseSequence:
     """Return one side at a regular training rate with a ``(T, 20)`` target.
 
@@ -86,7 +85,6 @@ def align_for_emg2pose(
     target = map_hand_pose_to_emg2pose(
         aligned_pose,
         side=side,
-        neutral_degrees=neutral_degrees,
     )
 
     return Emg2PoseSequence(
@@ -100,11 +98,6 @@ def align_for_emg2pose(
             f"{target_hz:g} Hz RMS per target interval"
             if emg_mode == "rms"
             else f"{target_hz:g} Hz linear interpolation"
-        ),
-        angle_calibration=(
-            "Xsens Manus open-hand neutral offset"
-            if neutral_degrees is not None
-            else "none"
         ),
     )
 
@@ -191,7 +184,6 @@ def write_emg2pose_hdf5(
                     if emg_scale is not None
                     else "; source units"
                 ),
-                "angle_calibration": sequence.angle_calibration,
             }
         )
     return output
@@ -205,7 +197,6 @@ def export_action_sense_recording(
     target_hz: float = 30.0,
     emg_mode: Literal["rms", "linear"] = "rms",
     emg_scale: float | None = 128.0,
-    angle_calibration: Literal["none", "xsens-open-hand"] = "none",
     include_invalid: bool = False,
     overwrite: bool = False,
 ) -> list[Path]:
@@ -220,18 +211,8 @@ def export_action_sense_recording(
 
     output_root = Path(output_dir)
     written: list[Path] = []
-    if angle_calibration not in {"none", "xsens-open-hand"}:
-        raise ValueError(f"unsupported angle calibration: {angle_calibration}")
 
     with ActionSenseLoader(source_path) as loader:
-        neutral_degrees_by_side = {
-            side: (
-                loader.emg2pose_open_hand_neutral_degrees(side)
-                if angle_calibration == "xsens-open-hand"
-                else None
-            )
-            for side in chosen_sides
-        }
         for activity_index, interval in enumerate(loader.activities()):
             if not include_invalid and interval.valid.strip().lower() not in {"", "good"}:
                 continue
@@ -246,7 +227,6 @@ def export_action_sense_recording(
                     side=side,
                     target_hz=target_hz,
                     emg_mode=emg_mode,
-                    neutral_degrees=neutral_degrees_by_side[side],
                 )
                 filename = (
                     f"{loader.subject}_{loader.session}_activity-{activity_index:03d}_{side}.hdf5"

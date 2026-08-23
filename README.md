@@ -144,14 +144,6 @@ python prepare_emg2pose.py \
   --side both --target-hz 30 --emg-mode rms
 ```
 
-For a calibration-controlled export, add
-`--angle-calibration xsens-open-hand`. This reads the timestamped Manus pose
-calibration in the raw recording, estimates each hand's open-hand neutral, and
-subtracts that 20-element degree offset before converting to radians. It does
-not change the raw HDF5 stream, target ordering, or `(T, 20)` shape. The
-default is `none` so the uncalibrated representation remains available for
-comparison.
-
 Each output contains `emg` with shape `(T, 8)`, `joint_angles` with shape
 `(T, 20)` in radians, and `time` with shape `(T,)`. The 20 columns use the
 same ordering as Meta's EMG2Pose target. The default `--emg-scale 128`
