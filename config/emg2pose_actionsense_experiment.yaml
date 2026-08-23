@@ -9,6 +9,7 @@ defaults:
   - _self_
 
 provide_initial_pos: false
+sample_rate: 30
 
 pose_module:
   predict_vel: false
