@@ -3,8 +3,9 @@
 
 This script is intended to run in the Meta ``emg2pose`` environment on the
 Linux workstation.  It runs the trained checkpoint on one prepared
-ActionSense HDF5 file, reconstructs the generic hand landmarks from the
-predicted and ground-truth joint angles, and writes a small side-by-side MP4.
+ActionSense HDF5 file and writes a side-by-side MP4 using the same
+``plot_hand_mesh``/``joint_angles_to_frames_parallel`` path as Meta's
+``notebooks/getting_started.ipynb``.
 
 The source video should already be a short clip for the same activity.  Keeping
 the source clip short avoids copying the full multi-gigabyte ActionSense video
@@ -91,65 +92,46 @@ def _infer(
     return prediction_times, prediction, target, left_context
 
 
-def _mesh_panel(
+def _mesh_frames(
+    angles: np.ndarray,
     *,
-    pred_angles: np.ndarray,
-    target_angles: np.ndarray,
-    side: str,
-    title: str,
-    error_degrees: float,
+    color: str,
+    flip: bool,
     width: int,
     height: int,
-    overlay: bool,
+    n_jobs: int = 4,
 ) -> np.ndarray:
-    """Render Meta's actual UmeTrack skinned hand mesh to a video panel."""
+    """Render frames through Meta's notebook visualization helpers.
+
+    The notebook calls ``joint_angles_to_frames_parallel`` directly.  That
+    helper calls ``plot_hand_mesh`` for every frame, which in turn uses the
+    UmeTrack generic hand model and Meta's camera/layout.  Keeping this path
+    intact avoids a second, subtly different Plotly renderer here.
+    """
 
     import cv2
-    import plotly.graph_objects as go
     from emg2pose import visualization
 
-    flip = side == "left"
-    prediction_mesh = visualization.generate_hand_mesh_from_joint_angles(
-        pred_angles,
-        color="crimson",
-        opacity=0.92,
+    frames = visualization.joint_angles_to_frames_parallel(
+        angles,
+        n_jobs=n_jobs,
+        color=color,
+        opacity=1.0,
         flip=flip,
-        name="prediction",
-    )
-    traces = [prediction_mesh]
-    legend = "prediction mesh"
-    if overlay:
-        target_mesh = visualization.generate_hand_mesh_from_joint_angles(
-            target_angles,
-            color="deepskyblue",
-            opacity=0.72,
-            flip=flip,
-            name="ground truth",
-        )
-        traces = [target_mesh, prediction_mesh]
-        legend = "GT blue  |  prediction red"
-
-    figure = go.Figure(data=traces)
-    figure = visualization._set_3d_plot_layout(
-        figure,
-        flip=flip,
+        auto_range=False,
         clean_background=True,
     )
-    figure.update_layout(
-        width=800,
-        height=600,
-        margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="black",
-        plot_bgcolor="black",
-        showlegend=False,
+    frames = visualization.remove_alpha_channel(frames)
+    return np.asarray(
+        [
+            cv2.resize(
+                cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
+                (width, height),
+                interpolation=cv2.INTER_AREA,
+            )
+            for frame in frames
+        ]
     )
-    panel = visualization.fig_to_array(figure)[..., :3]
-    panel = cv2.cvtColor(panel, cv2.COLOR_RGB2BGR)
-    panel = cv2.resize(panel, (width, height), interpolation=cv2.INTER_AREA)
-    cv2.putText(panel, title, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (240, 240, 240), 2, cv2.LINE_AA)
-    cv2.putText(panel, f"angle MAE {error_degrees:.1f} deg", (16, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
-    cv2.putText(panel, legend, (16, height - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (210, 210, 210), 1, cv2.LINE_AA)
-    return panel
 
 
 def render(
@@ -213,6 +195,30 @@ def render(
     target_angles = np.column_stack(
         [np.interp(query, pred_rel, target[:, joint]) for joint in range(20)]
     )
+
+    # This is intentionally the same public rendering path used in
+    # emg2pose/notebooks/getting_started.ipynb:
+    #
+    #   visualization.joint_angles_to_frames_parallel(..., color=...)
+    #
+    # The resulting panels are the notebook's separate GT/pred videos, rather
+    # than a custom transparent overlay or a hand-written Mesh3d scene.
+    flip = side == "left"
+    gt_panels = _mesh_frames(
+        target_angles,
+        color="gray",
+        flip=flip,
+        width=panel_width,
+        height=display_height,
+    )
+    pred_panels = _mesh_frames(
+        frame_angles,
+        color="lightpink",
+        flip=flip,
+        width=panel_width,
+        height=display_height,
+    )
+
     # Reopen the source so frames and precomputed panels stay synchronized.
     capture = cv2.VideoCapture(str(video))
     for index in range(len(video_times_array)):
@@ -221,26 +227,6 @@ def render(
             break
         frame = cv2.resize(frame, (display_width, display_height), interpolation=cv2.INTER_AREA)
         error_degrees = float(np.mean(np.abs(frame_angles[index] - target_angles[index])) * 180.0 / np.pi)
-        pred_panel = _mesh_panel(
-            pred_angles=frame_angles[index],
-            target_angles=target_angles[index],
-            side=side,
-            title="Predicted hand",
-            error_degrees=error_degrees,
-            width=panel_width,
-            height=display_height,
-            overlay=False,
-        )
-        overlay_panel = _mesh_panel(
-            pred_angles=frame_angles[index],
-            target_angles=target_angles[index],
-            side=side,
-            title="Prediction vs ground truth",
-            error_degrees=error_degrees,
-            width=panel_width,
-            height=display_height,
-            overlay=True,
-        )
         cv2.putText(
             frame,
             f"ActionSense RGB  |  frame {index + 1}/{len(video_times_array)}",
@@ -251,7 +237,13 @@ def render(
             2,
             cv2.LINE_AA,
         )
-        writer.write(np.concatenate((frame, pred_panel, overlay_panel), axis=1))
+        gt_panel = gt_panels[index].copy()
+        pred_panel = pred_panels[index].copy()
+        cv2.putText(gt_panel, "Ground truth", (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (70, 70, 70), 2, cv2.LINE_AA)
+        cv2.putText(gt_panel, f"angle MAE {error_degrees:.1f} deg", (16, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 90, 90), 1, cv2.LINE_AA)
+        cv2.putText(pred_panel, "Prediction", (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (70, 70, 70), 2, cv2.LINE_AA)
+        cv2.putText(pred_panel, f"angle MAE {error_degrees:.1f} deg", (16, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 90, 90), 1, cv2.LINE_AA)
+        writer.write(np.concatenate((frame, gt_panel, pred_panel), axis=1))
     capture.release()
     writer.release()
     return frame_count
