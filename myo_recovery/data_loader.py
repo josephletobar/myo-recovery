@@ -46,6 +46,8 @@ class ActionSenseLoader:
     # Unlike most ActionSense streams, this stream stores the absolute frame
     # timestamps directly in ``data``; there is no nested ``time_s`` dataset.
     WORLD_VIDEO_DATA = "/eye-tracking-video-world/frame_timestamp/data"
+    MANUS_CALIBRATION_DATA = "/experiment-calibration/third_party/data"
+    MANUS_CALIBRATION_TIME = "/experiment-calibration/third_party/time_s"
 
     def __init__(self, path: str | Path, *, video_path: str | Path | None = None):
         self.path = Path(path)
@@ -144,6 +146,47 @@ class ActionSenseLoader:
         if not matches:
             raise KeyError(f"activity not found: {selector!r}")
         return matches[0]
+
+    def emg2pose_open_hand_neutral_degrees(self, side: str) -> np.ndarray:
+        """Estimate a side-specific 20-D Xsens neutral from Manus calibration.
+
+        The raw ActionSense file records ``Manus: Poses Left`` and
+        ``Manus: Poses Right`` as timestamped third-party calibration intervals.
+        We read only the requested interval and estimate its open-hand offset;
+        the raw stream itself is never modified.
+        """
+        if side not in {"left", "right"}:
+            raise ValueError("side must be 'left' or 'right'")
+        data = np.asarray(self.file[self.MANUS_CALIBRATION_DATA][:])
+        times = np.asarray(self.file[self.MANUS_CALIBRATION_TIME][:]).reshape(-1)
+        label = f"Manus: Poses {side.capitalize()}"
+        start_time: float | None = None
+        interval: tuple[float, float] | None = None
+        for row, timestamp in zip(data, times):
+            state = _decode(row[0]).strip().lower()
+            calibration_type = _decode(row[3]).strip()
+            if calibration_type != label:
+                continue
+            if state == "start":
+                start_time = float(timestamp)
+            elif state == "stop" and start_time is not None:
+                interval = (start_time, float(timestamp))
+                break
+        if interval is None:
+            raise ValueError(f"no valid {label!r} interval in {self.path}")
+
+        from .emg2pose import (
+            estimate_open_hand_neutral_degrees,
+            map_hand_pose_to_emg2pose,
+        )
+
+        pose = self._read_timed(
+            "/xsens-joints/rotation_xzy_deg/data",
+            "/xsens-joints/rotation_xzy_deg/time_s",
+            *interval,
+        )
+        target = map_hand_pose_to_emg2pose(pose, side=side)
+        return estimate_open_hand_neutral_degrees(target)
 
     def load_activity(
         self,

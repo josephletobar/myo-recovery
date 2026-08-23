@@ -41,6 +41,14 @@ EMG2POSE_JOINT_NAMES: tuple[str, ...] = (
     "PINKY_DIP_FE",
 )
 
+# Flexion/extension components used to identify the open-hand portion of a
+# Manus calibration routine. Abduction/adduction components are deliberately
+# excluded: a naturally resting hand can have non-zero spread.
+_FLEXION_INDICES = np.asarray(
+    [0, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19],
+    dtype=np.int64,
+)
+
 
 @dataclass(slots=True)
 class Emg2PoseTarget:
@@ -76,6 +84,7 @@ class Emg2PoseSequence:
     emg: Stream
     target: Emg2PoseTarget
     emg_preprocessing: str = "native-rate"
+    angle_calibration: str = "none"
 
 
 def _source_headings(side: Literal["left", "right"]) -> tuple[str, ...]:
@@ -108,12 +117,16 @@ def map_hand_pose_to_emg2pose(
     hand_pose: Stream,
     *,
     side: Literal["left", "right"],
+    neutral_degrees: np.ndarray | None = None,
+    signs: np.ndarray | None = None,
 ) -> Emg2PoseTarget:
     """Select Xsens anatomical components into Meta's 20-D hand target.
 
-    This performs only the representation conversion and degrees-to-radians
-    conversion. It does not guess sign flips or neutral offsets; those must be
-    checked against the recording's calibration and documented separately.
+    The representation conversion and degrees-to-radians conversion are always
+    performed. ``neutral_degrees`` and ``signs`` optionally apply the explicit
+    Xsens-to-EMG2Pose calibration ``sign * (raw - neutral)`` before converting
+    to radians. They are explicit inputs so calibration never changes the raw
+    HDF5 stream or the ``(T, 20)`` target shape.
     """
     if side not in {"left", "right"}:
         raise ValueError("side must be 'left' or 'right'")
@@ -137,6 +150,21 @@ def map_hand_pose_to_emg2pose(
 
     columns = [heading_to_column[heading] for heading in source_headings]
     angles_degrees = flat[:, columns].astype(np.float64, copy=False)
+    if neutral_degrees is not None:
+        neutral = np.asarray(neutral_degrees, dtype=np.float64)
+        if neutral.shape != (len(EMG2POSE_JOINT_NAMES),):
+            raise ValueError(
+                "neutral_degrees must have shape (20,), "
+                f"got {neutral.shape}"
+            )
+        angles_degrees = angles_degrees - neutral
+    if signs is not None:
+        sign_array = np.asarray(signs, dtype=np.float64)
+        if sign_array.shape != (len(EMG2POSE_JOINT_NAMES),):
+            raise ValueError(f"signs must have shape (20,), got {sign_array.shape}")
+        if not np.isin(sign_array, (-1.0, 1.0)).all():
+            raise ValueError("signs must contain only -1 or +1")
+        angles_degrees = angles_degrees * sign_array
     angles_radians = np.deg2rad(angles_degrees)
     if not np.isfinite(angles_radians).all():
         raise ValueError("EMG2Pose target contains NaN or infinite joint angles")
@@ -147,6 +175,37 @@ def map_hand_pose_to_emg2pose(
         side=side,
         source=hand_pose.source,
     )
+
+
+def estimate_open_hand_neutral_degrees(
+    target: Emg2PoseTarget,
+    *,
+    percentile: float = 5.0,
+) -> np.ndarray:
+    """Estimate an open-hand neutral from a Manus hand-pose calibration.
+
+    Manus' pose routine cycles through several hand poses. The frames with
+    the smallest total positive finger flexion are the open/spread portion;
+    their per-joint median is used as the neutral. This is an offset-only
+    calibration and returns exactly ``(20,)`` degrees. It does not infer
+    signs or rescale any joint.
+    """
+    if not 0.0 < percentile <= 50.0:
+        raise ValueError("percentile must be in (0, 50]")
+    angles = np.asarray(target.joint_angles_degrees, dtype=np.float64)
+    if angles.ndim != 2 or angles.shape[1] != len(EMG2POSE_JOINT_NAMES):
+        raise ValueError(f"expected target shape (T, 20), got {angles.shape}")
+    if len(angles) == 0:
+        raise ValueError("cannot estimate a neutral from an empty calibration")
+    flexion_score = np.maximum(angles[:, _FLEXION_INDICES], 0.0).sum(axis=1)
+    threshold = np.percentile(flexion_score, percentile)
+    candidates = angles[flexion_score <= threshold]
+    if len(candidates) == 0:
+        candidates = angles[[int(np.argmin(flexion_score))]]
+    neutral = np.median(candidates, axis=0)
+    if not np.isfinite(neutral).all():
+        raise ValueError("estimated neutral contains NaN or infinite values")
+    return neutral
 
 
 def make_emg2pose_sequence(
@@ -169,4 +228,5 @@ def make_emg2pose_sequence(
         emg=emg,
         target=map_hand_pose_to_emg2pose(sequence.hand_pose, side=side),
         emg_preprocessing="native-rate",
+        angle_calibration="none",
     )
