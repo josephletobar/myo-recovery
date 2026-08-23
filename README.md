@@ -184,10 +184,10 @@ network but enable the optional training-window sampler:
 ```sh
 python -m emg2pose.train train=True eval=True \
   experiment=regression_actionsense \
-  datamodule=actionsense_30hz transforms=basic \
-  datamodule.motion_sampling=true \
-  datamodule.motion_sampling_floor=0.25 \
-  datamodule.motion_sampling_power=0.5
+  transforms=basic \
+  +datamodule.motion_sampling=true \
+  +datamodule.motion_sampling_floor=0.25 \
+  +datamodule.motion_sampling_power=0.5
 ```
 
 This changes only the training-window draw probabilities. Validation and test
