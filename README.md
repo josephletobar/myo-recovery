@@ -197,6 +197,11 @@ This changes only the training-window draw probabilities. Validation and test
 windows remain uniformly sampled, and Meta's original MAE plus fingertip loss
 is unchanged.
 
+The stateless decoder ablation additionally uses
+`provide_initial_pos=false pose_module.state_condition=false
+pose_module.decoder.in_channels=64`. The width changes from 84 to 64 because
+the decoder no longer receives the previous 20-angle pose.
+
 ## Render a qualitative reconstruction
 
 For a frame-synchronous qualitative check, run
