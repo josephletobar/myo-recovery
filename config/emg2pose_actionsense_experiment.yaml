@@ -1,0 +1,25 @@
+# @package _global_
+# Experiment fragment copied into the Meta EMG2Pose repo as
+# config/experiment/regression_actionsense.yaml.
+
+defaults:
+  - /pose_module: actionsense_30hz
+  - /pose_module/decoder: mlp
+  - /network: tds_actionsense
+  - _self_
+
+provide_initial_pos: false
+
+pose_module:
+  predict_vel: false
+  state_condition: true
+
+optimizer:
+  lr: 0.001
+
+datamodule:
+  window_length: 120
+  val_test_window_length: 600
+
+trainer:
+  gradient_clip_val: 1

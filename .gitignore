@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local datasets and downloaded media stay outside the repository.
+data/
+datasets/
+*.hdf5
+*.h5
+*.mp4
+*.mov
+
+# Local training outputs and model weights are reproducible artifacts, not source.
+artifacts/
+checkpoints/
+runs/
+logs/
+*.ckpt
+*.pt
+*.pth
+
+# Machine-local configuration may contain paths or credentials.
+*.local.yaml
+*.local.yml
+*.local.json
+.env
+.env.*

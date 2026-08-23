@@ -1,0 +1,13 @@
+# @package _global_
+# Datamodule fragment for the 30 Hz ActionSense export.
+#
+# Copy this to the Meta repository as
+# config/datamodule/actionsense_30hz.yaml and select it with
+# `datamodule=actionsense_30hz`.
+datamodule:
+  # The stride-1 TDS network has 63 samples of left context (about 2.1 s at
+  # 30 Hz), so a training window must be longer than that context.
+  window_length: 120          # 4 seconds at 30 Hz
+  val_test_window_length: 600 # 20 seconds at 30 Hz
+  padding: [0, 0]
+  skip_ik_failures: true
