@@ -91,111 +91,61 @@ def _infer(
     return prediction_times, prediction, target, left_context
 
 
-def _landmark_batch(
-    angles: np.ndarray,
+def _mesh_panel(
     *,
+    pred_angles: np.ndarray,
+    target_angles: np.ndarray,
     side: str,
-    torch: Any,
-) -> np.ndarray:
-    """Convert a batch of 20-D angle vectors to UmeTrack landmarks."""
-
-    from emg2pose.kinematics import forward_kinematics, load_hand_model_from_json
-    from emg2pose.visualization import mirror_profile
-
-    model_path = Path(__file__).resolve().parent / "emg2pose" / "UmeTrack" / "dataset" / "generic_hand_model.json"
-    if not model_path.is_file():
-        # When this file is copied to the Meta checkout, resolve relative to
-        # the imported package instead of the MyoRecovery checkout.
-        import emg2pose
-
-        model_path = Path(emg2pose.__file__).resolve().parent / "UmeTrack" / "dataset" / "generic_hand_model.json"
-    profile = load_hand_model_from_json(str(model_path))
-    if side == "left":
-        profile = mirror_profile(profile)
-
-    angle_tensor = torch.from_numpy(angles.T[None]).to(dtype=torch.float32)
-    with torch.inference_mode():
-        landmarks = forward_kinematics(angle_tensor, profile)[0].detach().cpu().numpy()
-    return landmarks
-
-
-def _project_skeleton(
-    landmarks: np.ndarray,
-    *,
-    width: int,
-    height: int,
-    color: tuple[int, int, int],
-    canvas: np.ndarray,
-) -> None:
-    """Draw a stable x/z projection of the UmeTrack hand landmarks."""
-
-    import cv2
-
-    # UmeTrack's generic hand model is in millimetres.  These fixed bounds
-    # keep the hand stable in the panel while it moves.
-    x_min, x_max = -210.0, 210.0
-    z_min, z_max = -100.0, 125.0
-
-    def point(index: int) -> tuple[int, int]:
-        x, _, z = landmarks[index]
-        px = int(round((x - x_min) / (x_max - x_min) * (width - 1)))
-        py = int(round((z_max - z) / (z_max - z_min) * (height - 1)))
-        return px, py
-
-    # Landmark indices: wrist 5; thumb 6-7-0; fingers proximal/intermediate/
-    # distal/fingertip are 8-9-10-1, ..., 17-18-19-4.
-    chains = (
-        (5, 6, 7, 0),
-        (5, 8, 9, 10, 1),
-        (5, 11, 12, 13, 2),
-        (5, 14, 15, 16, 3),
-        (5, 17, 18, 19, 4),
-    )
-    for chain in chains:
-        for first, second in zip(chain, chain[1:]):
-            cv2.line(canvas, point(first), point(second), color, 3, cv2.LINE_AA)
-    for index in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19):
-        cv2.circle(canvas, point(index), 5, color, -1, cv2.LINE_AA)
-
-
-def _hand_panel(
-    *,
-    pred_landmarks: np.ndarray,
-    target_landmarks: np.ndarray,
     title: str,
     error_degrees: float,
     width: int,
     height: int,
     overlay: bool,
 ) -> np.ndarray:
-    import cv2
+    """Render Meta's actual UmeTrack skinned hand mesh to a video panel."""
 
-    panel = np.zeros((height, width, 3), dtype=np.uint8)
+    import cv2
+    import plotly.graph_objects as go
+    from emg2pose import visualization
+
+    flip = side == "left"
+    prediction_mesh = visualization.generate_hand_mesh_from_joint_angles(
+        pred_angles,
+        color="crimson",
+        opacity=0.92,
+        flip=flip,
+        name="prediction",
+    )
+    traces = [prediction_mesh]
+    legend = "prediction mesh"
     if overlay:
-        _project_skeleton(
-            target_landmarks,
-            width=width,
-            height=height,
-            color=(255, 170, 50),
-            canvas=panel,
+        target_mesh = visualization.generate_hand_mesh_from_joint_angles(
+            target_angles,
+            color="deepskyblue",
+            opacity=0.72,
+            flip=flip,
+            name="ground truth",
         )
-        _project_skeleton(
-            pred_landmarks,
-            width=width,
-            height=height,
-            color=(50, 70, 255),
-            canvas=panel,
-        )
+        traces = [target_mesh, prediction_mesh]
         legend = "GT blue  |  prediction red"
-    else:
-        _project_skeleton(
-            pred_landmarks,
-            width=width,
-            height=height,
-            color=(50, 70, 255),
-            canvas=panel,
-        )
-        legend = "prediction"
+
+    figure = go.Figure(data=traces)
+    figure = visualization._set_3d_plot_layout(
+        figure,
+        flip=flip,
+        clean_background=True,
+    )
+    figure.update_layout(
+        width=800,
+        height=600,
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="black",
+        plot_bgcolor="black",
+        showlegend=False,
+    )
+    panel = visualization.fig_to_array(figure)[..., :3]
+    panel = cv2.cvtColor(panel, cv2.COLOR_RGB2BGR)
+    panel = cv2.resize(panel, (width, height), interpolation=cv2.INTER_AREA)
     cv2.putText(panel, title, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (240, 240, 240), 2, cv2.LINE_AA)
     cv2.putText(panel, f"angle MAE {error_degrees:.1f} deg", (16, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
     cv2.putText(panel, legend, (16, height - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (210, 210, 210), 1, cv2.LINE_AA)
@@ -213,7 +163,6 @@ def render(
     video_start_offset: float,
     panel_width: int,
     output_fps: float | None,
-    torch: Any,
 ) -> int:
     import cv2
 
@@ -264,9 +213,6 @@ def render(
     target_angles = np.column_stack(
         [np.interp(query, pred_rel, target[:, joint]) for joint in range(20)]
     )
-    pred_landmarks = _landmark_batch(frame_angles, side=side, torch=torch)
-    target_landmarks = _landmark_batch(target_angles, side=side, torch=torch)
-
     # Reopen the source so frames and precomputed panels stay synchronized.
     capture = cv2.VideoCapture(str(video))
     for index in range(len(video_times_array)):
@@ -275,18 +221,20 @@ def render(
             break
         frame = cv2.resize(frame, (display_width, display_height), interpolation=cv2.INTER_AREA)
         error_degrees = float(np.mean(np.abs(frame_angles[index] - target_angles[index])) * 180.0 / np.pi)
-        pred_panel = _hand_panel(
-            pred_landmarks=pred_landmarks[index],
-            target_landmarks=target_landmarks[index],
+        pred_panel = _mesh_panel(
+            pred_angles=frame_angles[index],
+            target_angles=target_angles[index],
+            side=side,
             title="Predicted hand",
             error_degrees=error_degrees,
             width=panel_width,
             height=display_height,
             overlay=False,
         )
-        overlay_panel = _hand_panel(
-            pred_landmarks=pred_landmarks[index],
-            target_landmarks=target_landmarks[index],
+        overlay_panel = _mesh_panel(
+            pred_angles=frame_angles[index],
+            target_angles=target_angles[index],
+            side=side,
             title="Prediction vs ground truth",
             error_degrees=error_degrees,
             width=panel_width,
@@ -363,7 +311,6 @@ def main() -> int:
         video_start_offset=args.video_start_offset,
         panel_width=args.panel_width,
         output_fps=args.fps,
-        torch=torch,
     )
     print(f"wrote {args.output} ({frame_count} frames; model context {left_context} samples)")
     return 0

@@ -183,9 +183,10 @@ python -m emg2pose.train train=True eval=True \
 For a frame-synchronous qualitative check, run
 `render_actionsense_reconstruction.py` in the Linux EMG2Pose environment. It
 keeps the heavy checkpoint on the GPU, reconstructs the 20 joint angles, and
-writes a 30 Hz MP4 with three panels: ActionSense RGB, the predicted hand, and
-the prediction overlaid on the ground-truth hand. The input video can be a
-short clip for one activity rather than the full multi-gigabyte recording.
+uses Meta's UmeTrack skinning model to write a 30 Hz MP4 with three panels:
+ActionSense RGB, the predicted hand mesh, and the prediction overlaid on the
+ground-truth mesh. The input video can be a short clip for one activity rather
+than the full multi-gigabyte recording.
 
 ```sh
 python render_actionsense_reconstruction.py \
