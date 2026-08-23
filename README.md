@@ -170,6 +170,9 @@ The Meta pose module is patched on the Linux checkout's `main` branch
 same explicit rate; no 2,000-Hz compatibility setting or hidden resampling is
 needed.
 
+The optional motion-aware sampler used for the ablation is in the Linux
+EMG2Pose checkout at local commit `daae13c`; it is not an upstream Meta change.
+
 The resulting Meta-repository selection is:
 
 ```sh
